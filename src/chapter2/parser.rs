@@ -1,9 +1,9 @@
 
 use nom::{
     IResult,
-    bytes::complete::{tag_no_case},
+    bytes::complete::tag,
     branch::alt,
-    character::complete::{char, space0},
+    character::complete::{char, multispace0},
     Err,
     number::complete::double,
     sequence::{Tuple, delimited},
@@ -12,12 +12,12 @@ use nom::{
 use super::language::*;
 
 fn comma_separator(text: &str) -> IResult<&str, ()> {
-    let (text, _) = (space0, char(','), space0).parse(text)?;
+    let (text, _) = (multispace0, char(','), multispace0).parse(text)?;
     Ok((text, ()))
 }
 
 fn semicolon_separator(text: &str) -> IResult<&str, ()> {
-    let (text, _) = (space0, char(';'), space0).parse(text)?;
+    let (text, _) = (multispace0, char(';'), multispace0).parse(text)?;
     Ok((text, ()))
 }
 
@@ -32,37 +32,37 @@ fn float_triple(text: &str) -> IResult<&str, (f64, f64, f64)> {
 }
 
 fn parenthesized_float_pair(text: &str) -> IResult<&str, (f64, f64)> {
-    let (text, (_, _, float_pair, _, _)) = (char('('), space0, float_pair, space0, char(')')).parse(text)?;
+    let (text, (_, _, float_pair, _, _)) = (char('('), multispace0, float_pair, multispace0, char(')')).parse(text)?;
     Ok((text, float_pair))
 }
 
 fn parenthesized_float_triple(text: &str) -> IResult<&str, (f64, f64, f64)> {
-    let (text, (_, _, float_triple, _, _)) = (char('('), space0, float_triple, space0, char(')')).parse(text)?;
+    let (text, (_, _, float_triple, _, _)) = (char('('), multispace0, float_triple, multispace0, char(')')).parse(text)?;
     Ok((text, float_triple))
 }
 
 fn translation_expression(text: &str) -> IResult<&str, Expression> {
-    let (text, (_, _, (u, v))) = (tag_no_case("translation"), space0, parenthesized_float_pair).parse(text)?;
+    let (text, (_, _, (u, v))) = (tag("translation"), multispace0, parenthesized_float_pair).parse(text)?;
     Ok((text, Expression::Translation { u, v }))
 }
 
 fn rotation_expression(text: &str) -> IResult<&str, Expression> {
-    let (text, (_, _, (u, v, theta))) = (tag_no_case("rotation"), space0, parenthesized_float_triple).parse(text)?;
+    let (text, (_, _, (u, v, theta))) = (tag("rotation"), multispace0, parenthesized_float_triple).parse(text)?;
     Ok((text, Expression::Rotation { u, v, theta }))
 }
 
 fn iterate_expression(text: &str) -> IResult<&str, Expression> {
-    let (text, (_, _, _, _, body, _, _)) = (tag_no_case("iter"), space0, char('('), space0, expression, space0, char(')')).parse(text)?;
+    let (text, (_, _, _, _, body, _, _)) = (tag("iter"), multispace0, char('('), multispace0, expression, multispace0, char(')')).parse(text)?;
     Ok((text, Expression::Iterate(Box::new(body))))
 }
 
 fn eitheror_leaf(text: &str) -> IResult<&str, Expression> {
-    let (text, (_, _, expr, _, _)) = (char('{'), space0, expression, space0, char('}')).parse(text)?;
+    let (text, (_, _, expr, _, _)) = (char('{'), multispace0, expression, multispace0, char('}')).parse(text)?;
     Ok((text, expr))
 }
 
 fn eitheror_expression(text: &str) -> IResult<&str, Expression> {
-    let (text, (left, _, _, _, right)) = (eitheror_leaf, space0, tag_no_case("or"), space0, eitheror_leaf).parse(text)?;
+    let (text, (left, _, _, _, right)) = (eitheror_leaf, multispace0, tag("or"), multispace0, eitheror_leaf).parse(text)?;
     Ok((text, Expression::EitherOr { left: Box::new(left), right: Box::new(right) }))
 }
 
@@ -87,7 +87,7 @@ fn expression(text: &str) -> IResult<&str, Expression> {
 
 #[test]
 fn test_basic_expressions() {
-    let raw_translation_expression = "Translation ( 0.7, 18.65 )";
+    let raw_translation_expression = "translation ( 0.7, 18.65 )";
     let expected_expression = Expression::Translation { u: 0.7, v: 18.65 };
     let (_, parsed_expression) = translation_expression(raw_translation_expression).unwrap();
     assert_eq!(expected_expression, parsed_expression);
@@ -121,6 +121,29 @@ fn test_iterate_expressions() {
 #[test]
 fn test_complex_expression() {
     let raw_expression = "iter(translation(12.0, 0.4); rotation(0.2, 0.3, 0.5)); translation( 8, 15 )";
+    let expected_expression =
+      Expression::Chained(Box::new(
+        Expression::Iterate(Box::new(
+            Expression::Chained(
+                Box::new(Expression::Translation { u: 12.0, v: 0.4 }),
+                Box::new(Expression::Rotation { u: 0.2, v: 0.3, theta: 0.5 })
+            )
+        ))),
+        Box::new(Expression::Translation { u: 8.0, v: 15.0 }),
+      );
+    let (_, parsed_expression) = expression(raw_expression).unwrap();
+    assert_eq!(expected_expression, parsed_expression);
+}
+
+#[test]
+fn test_multiline_expression() {
+    let raw_expression = 
+r"iter(
+    translation(12.0, 0.4);
+    rotation(0.2, 0.3, 0.5)
+);
+translation( 8.0, 15.0 )
+";
     let expected_expression =
       Expression::Chained(Box::new(
         Expression::Iterate(Box::new(
